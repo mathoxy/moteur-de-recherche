@@ -5,11 +5,7 @@ class Retriever:
         vectorstore,
         k=5
     ):
-        self.retriever = vectorstore.as_retriever(
-            search_kwargs={
-                "k": k
-            }
-        )
+        self.retriever = vectorstore.as_retriever(k)
 
     def retrieve(
         self,

@@ -1,20 +1,20 @@
 from langchain_chroma import Chroma
-
+from app.core.config import PERSIST_DIRECTORY
 
 class VectorStore:
 
     def __init__(
         self,
-        persist_directory: str,
-        embeddings
+        embeddings,
+        persist_directory: str = PERSIST_DIRECTORY
     ):
         self.db = Chroma(
-            persist_directory=persist_directory,
-            embedding_function=embeddings
+            embedding_function=embeddings,
+            persist_directory=persist_directory
         )
 
     def add_documents(self, documents):
         self.db.add_documents(documents)
 
-    def as_retriever(self):
-        return self.db.as_retriever()
+    def as_retriever(self, k):
+        return self.db.as_retriever(k=k)
