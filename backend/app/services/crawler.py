@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import sys
 import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
+
+if __package__ in (None, ""):
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
+
+from app.utils.document_metadata import normalize_publication_date, save_file_metadata
 
 
 class SGGCrawler:
@@ -49,9 +55,9 @@ class SGGCrawler:
         token = token_input.get("value", "").strip()
         return token or None
 
-    def get_bulletin_links(self) -> List[str]:
-        """Extract bulletin PDF links from the SGG AJAX endpoint."""
-        links: List[str] = []
+    def get_bulletin_documents(self) -> List[dict[str, Any]]:
+        """Extract bulletin PDF links and metadata from the SGG AJAX endpoint."""
+        documents: List[dict[str, Any]] = []
         seen: set[str] = set()
 
         token = self._get_request_verification_token()
@@ -85,14 +91,25 @@ class SGGCrawler:
                     if absolute_url in seen:
                         continue
 
-                    links.append(absolute_url)
+                    documents.append(
+                        {
+                            "title": f"Bulletin Officiel n° {item.get('BoNum', '')}".strip(),
+                            "document_type": "Bulletin officiel",
+                            "document_number": item.get("BoNum"),
+                            "publication_date": normalize_publication_date(item.get("BoDate")),
+                            "source_url": absolute_url,
+                            "language": "fr",
+                            "article": None,
+                            "bo_id": item.get("BoId"),
+                        }
+                    )
                     seen.add(absolute_url)
 
-                    if len(links) >= self.nbre_pages:
+                    if len(documents) >= self.nbre_pages:
                         break
 
-                if links:
-                    return links
+                if documents:
+                    return documents
             except (requests.RequestException, ValueError) as exc:
                 print(f"Failed to fetch bulletin API data: {exc}")
 
@@ -115,13 +132,28 @@ class SGGCrawler:
             if absolute_url in seen:
                 continue
 
-            links.append(absolute_url)
+            documents.append(
+                {
+                    "title": Path(parsed.path).stem,
+                    "document_type": "Bulletin officiel",
+                    "document_number": None,
+                    "publication_date": None,
+                    "source_url": absolute_url,
+                    "language": "fr",
+                    "article": None,
+                    "bo_id": None,
+                }
+            )
             seen.add(absolute_url)
 
-            if len(links) >= self.nbre_pages:
+            if len(documents) >= self.nbre_pages:
                 break
 
-        return links
+        return documents
+
+    def get_bulletin_links(self) -> List[str]:
+        """Backward-compatible helper that returns bulletin URLs only."""
+        return [document["source_url"] for document in self.get_bulletin_documents()]
 
     def _safe_filename(self, url: str, content_type: str = "") -> str:
         """Build a filesystem-safe filename from a URL."""
@@ -142,18 +174,48 @@ class SGGCrawler:
 
     def _already_downloaded(self, url: str) -> bool:
         """Check whether this bulletin already exists in the raw directory."""
+        return self._existing_download_path(url) is not None
+
+    def _existing_download_path(self, url: str) -> Optional[Path]:
+        """Return the first matching file already stored for this bulletin URL."""
         parsed = urlparse(url)
         name = Path(parsed.path).name
         if not name:
-            return False
+            return None
 
         stem = Path(name).stem
         suffix = Path(name).suffix
-        return any(self.raw_dir.glob(f"{stem}*{suffix}"))
+        for candidate in self.raw_dir.glob(f"{stem}*{suffix}"):
+            if candidate.is_file():
+                return candidate
+        return None
 
-    def download_bulletin(self, bulletin_link: str) -> Optional[Path]:
+    def download_bulletin(self, bulletin: dict[str, Any] | str) -> Optional[Path]:
         """Download one bulletin document into backend/data/raw."""
-        if self._already_downloaded(bulletin_link):
+        if isinstance(bulletin, str):
+            bulletin = {"source_url": bulletin}
+
+        bulletin_link = bulletin["source_url"]
+        existing_path = self._existing_download_path(bulletin_link)
+
+        if existing_path is not None:
+            sidecar_path = existing_path.with_suffix(".json")
+            if not sidecar_path.exists():
+                save_file_metadata(
+                    existing_path,
+                    {
+                        "title": bulletin.get("title"),
+                        "document_type": bulletin.get("document_type"),
+                        "document_number": bulletin.get("document_number"),
+                        "publication_date": bulletin.get("publication_date"),
+                        "source_url": bulletin.get("source_url"),
+                        "language": bulletin.get("language", "fr"),
+                        "article": bulletin.get("article"),
+                        "bo_id": bulletin.get("bo_id"),
+                        "downloaded_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+
             print(f"Skipping already downloaded file: {bulletin_link}")
             return None
 
@@ -173,6 +235,21 @@ class SGGCrawler:
                         if chunk:
                             handle.write(chunk)
 
+            save_file_metadata(
+                target_path,
+                {
+                    "title": bulletin.get("title"),
+                    "document_type": bulletin.get("document_type"),
+                    "document_number": bulletin.get("document_number"),
+                    "publication_date": bulletin.get("publication_date"),
+                    "source_url": bulletin.get("source_url"),
+                    "language": bulletin.get("language", "fr"),
+                    "article": bulletin.get("article"),
+                    "bo_id": bulletin.get("bo_id"),
+                    "downloaded_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+
             print(f"Downloaded {bulletin_link} -> {target_path}")
             return target_path
         except requests.RequestException as exc:
@@ -182,14 +259,14 @@ class SGGCrawler:
     def run(self) -> List[Path]:
         """Fetch bulletin links and download the requested number of documents."""
         print(f"Fetching bulletin links from {self.base_url}")
-        links = self.get_bulletin_links()
-        if not links:
+        bulletins = self.get_bulletin_documents()
+        if not bulletins:
             print("No bulletin links found.")
             return []
 
         downloaded_files: List[Path] = []
-        for bulletin_link in links[: self.nbre_pages]:
-            downloaded = self.download_bulletin(bulletin_link)
+        for bulletin in bulletins[: self.nbre_pages]:
+            downloaded = self.download_bulletin(bulletin)
             if downloaded is not None:
                 downloaded_files.append(downloaded)
 

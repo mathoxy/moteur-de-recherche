@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f5f5f7;
+  --foreground: #111827;
+  --card: #ffffff;
+  --border: #dfe3ea;
+  --secondary: #eef2f7;
+  --primary: #3f51b5;
+  --primary-soft: #eef0ff;
+  --muted: #677287;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.search-shadow {
+  box-shadow: 0 8px 18px rgba(36, 46, 75, 0.08);
+}
+
+.result-card {
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.1);
+}

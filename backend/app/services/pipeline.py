@@ -3,6 +3,7 @@ from app.core.config import BASE_DIR
 
 from app.utils.hash_utils import file_hash
 from app.utils.ingestion_registry import IngestionRegistry
+from app.utils.document_metadata import extract_article_number, load_file_metadata
 
 from app.core.dependencies import parser, chunker, vectorstore
 
@@ -32,13 +33,28 @@ class IngestionPipeline:
             )
             return False
 
-        documents = self.parser.parse(
-            file_path
-        )
+        try:
+            documents = self.parser.parse(
+                file_path
+            )
+        except Exception as exc:
+            print(
+                f"[FAIL] {file_path.name}: {exc}"
+            )
+            return False
+
+        file_metadata = load_file_metadata(file_path)
+        for document in documents:
+            document.metadata.update(file_metadata)
 
         chunks = self.chunker.split(
             documents
         )
+
+        for chunk in chunks:
+            article = extract_article_number(chunk.page_content)
+            if article:
+                chunk.metadata["article"] = article
 
         self.vectorstore.add_documents(
             chunks
@@ -60,7 +76,7 @@ class IngestionPipeline:
         directory_path: Path = BASE_DIR / "data" / "raw"
     ) -> None:
         for file_path in directory_path.iterdir():
-            if file_path.is_file():
+            if file_path.is_file() and file_path.suffix.lower() == ".pdf":
                 self.ingest(
                     file_path
                 )
